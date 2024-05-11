@@ -8,7 +8,7 @@
 
 import assemblyai as aai
 
-
+aai.settings.api_key = "f9f721b942204f959ff1e130792157a9"
 
 def on_open(session_opened: aai.RealtimeSessionOpened):
   "This function is called when the connection has been established."

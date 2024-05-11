@@ -6,11 +6,14 @@ import assemblyai as aai
 import argparse
 from dataclasses import dataclass
 from langchain.vectorstores.chroma import Chroma
-from langchain_community.embeddings import OpenAIEmbeddings
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from flask import stream_with_context # Streamer for openAI
 from nltk import sent_tokenize  # Import sentence tokenizer
+
+import pyaudio
+import numpy as np
 
 app = Flask(__name__)
 CORS(app, origins="*", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], supports_credentials=True)
@@ -22,7 +25,7 @@ insight_queue = queue.Queue()
 transcription_started = False
 full_transcript = ""  # Variable to store the full transcript
 
-aai.settings.api_key = "f9f721b942204f959ff1e130792157a9"  # Be sure to replace with your actual API key
+
 
 CHROMA_PATH = "chroma"
 
@@ -46,10 +49,10 @@ def on_data(transcript: aai.RealtimeTranscript):
         transcription_queue.put(transcript.text)  # Push real-time text to the transcription queue
 
         # Continue to process chunks of three sentences for insights
-        while len(sentences) >= 3:
-            chunk = ' '.join(sentences[:3])
+        while len(sentences) >= 4:
+            chunk = ' '.join(sentences[:4])
             insight_queue.put(chunk)  # Put the chunk into the insight queue for processing
-            sentences = sentences[3:]
+            sentences = sentences[4:]
 
         # Save any remaining sentences back to full_transcript
         full_transcript = ' '.join(sentences)
@@ -71,31 +74,45 @@ transcriber = aai.RealtimeTranscriber(
 )
 
 def start_transcription():
-    global full_transcript
-    full_transcript = ""  # Reset the full transcript on start
-    transcriber.connect()
-    microphone_stream = aai.extras.MicrophoneStream(sample_rate=16_000)
-    transcriber.stream(microphone_stream)
-    transcriber.start()
+    global transcriber
+    if transcriber is None:
+        transcriber = create_transcriber()
+        transcriber.connect()
+        return True  # Indicate that transcription started successfully
+    else:
+        return False  # Indicate that transcription is already started
 
-def stop_transcription():
-    transcriber.close()
+
+
+def create_transcriber():
+    return aai.RealtimeTranscriber(
+        sample_rate=16_000,
+        on_data=on_data,
+        on_error=on_error,
+        on_open=on_open,
+        on_close=on_close,
+        end_utterance_silence_threshold=800,
+        disable_partial_transcripts=True,
+    )
+
+transcriber = None  # Global variable to hold the transcriber instance
+
+@app.route('/pingserver')
+def ping():
+    return 'Server is online'
 
 @app.route('/start_transcription', methods=['POST'])
 def handle_start_transcription():
-    global transcription_started
-    if not transcription_started:
-        start_transcription()
-        transcription_started = True
+    if start_transcription():
         return jsonify({'data': 'Transcription started'}), 200
     else:
         return jsonify({'error': 'Transcription is already started'}), 409
 
 @app.route('/stop_transcription', methods=['POST'])
 def handle_stop_transcription():
+    transcriber.close()
     global transcription_started
     if transcription_started:
-        stop_transcription()
         transcription_started = False
         return jsonify({'data': 'Transcription stopped'}), 200
     else:
@@ -106,8 +123,8 @@ def generate_response_stream():
     while True:
         if not transcription_queue.empty():
             data = transcription_queue.get()
-            yield f" {data}\n\n"
-        time.sleep(1)  # Adjust timing as needed
+            yield f" {data} \n\n "
+        time.sleep(.5)  # Adjust timing as needed
 
 def stream_insights():
     """Stream insights from processed text chunks."""
@@ -125,6 +142,47 @@ def stream_text():
 @app.route('/insights', methods=['POST'])
 def handle_query():
     return Response(stream_insights(), mimetype='text/event-stream')
+
+# Initialize PyAudio
+pa = pyaudio.PyAudio()
+
+# Define audio stream parameters
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+RATE = 16000  # Sample rate
+CHUNK_SIZE = 2048  # Number of frames per buffer
+
+# Open microphone stream
+stream = pa.open(format=pyaudio.paInt16,
+                 channels=1,
+                 rate=16000,
+                 input=True,
+                 frames_per_buffer=CHUNK_SIZE)
+
+
+# Function to continuously stream audio data
+def audio_stream():
+    while True:
+        # Read audio data from the microphone
+        audio_data = stream.read(CHUNK_SIZE, exception_on_overflow=False)
+        yield audio_data
+
+# Route to stream audio data
+@app.route('/audio', methods=['POST'])
+def stream_audio():
+    if not transcription_started:
+        return jsonify({'error': 'Transcription is not started'}), 409
+
+    # Ensure the stream is continuously reading and processing data
+    try:
+        audio_generator = (stream.read(CHUNK_SIZE, exception_on_overflow=False) for _ in iter(int, 1))
+        transcriber.stream(audio_generator)
+    except Exception as e:
+        app.logger.error(f"Failed during streaming: {str(e)}")
+        return jsonify({'error': 'Failed during streaming'}), 500
+
+    return jsonify({'message': 'Streaming and transcription started'}), 200
+
 
 def openaione(text_chunk):
     embedding_function = OpenAIEmbeddings()
@@ -147,4 +205,4 @@ def openaione(text_chunk):
     yield f"{formatted_response}\n\n"
     
 if __name__ == '__main__':
-    app.run(debug=True, port=8000)
+    app.run(debug=True, port=8000, threaded=True)
