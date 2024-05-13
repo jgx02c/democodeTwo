@@ -1,0 +1,17 @@
+Medical Record Summary:
+Patient Name: Jack Smith 
+Date of Birth:  6/11/1985
+Date of Admission: February 10, 2022
+Chief Complaint:Patient presents with complaints of lower back pain and left shoulder discomfort following a motor vehicle accident.
+Medical History:
+	•	Previous history of chronic lower back pain
+	•	No history of shoulder injuries
+Diagnostic Findings:
+	•	X-rays of the lumbar spine reveal degenerative changes consistent with prior injury
+	•	MRI of the left shoulder shows no acute pathology
+Diagnosis:
+	•	Chronic lower back pain exacerbated by recent trauma
+	•	No acute shoulder injury identified
+Treatment Plan:
+	•	Prescribed pain medication for symptomatic relief
+	•	Referral to physical therapy for back pain management
